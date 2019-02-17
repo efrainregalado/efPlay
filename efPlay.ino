@@ -5,6 +5,9 @@
 #include <U8g2lib.h>
 #include <SPI.h>
 
+// SW Debounce for buttons
+#include <Bounce2.h>
+
 // ATMega32u4 pins
 #define OLED_DC    49 //  D8  - B4
 #define OLED_CS    48 // D17 - B0 
@@ -31,6 +34,17 @@ const int buttonPush =  8;  //Push       Red X
 const int screenWidth = 256; //pixels
 const int screenHeight = 64; //pixels
 
+//debounce delay
+const int debouncerInterval = 10; //in ms
+Bounce debouncerA = Bounce();
+Bounce debouncerB = Bounce();
+Bounce debouncerC = Bounce();
+Bounce debouncerD = Bounce();
+Bounce debouncerPush = Bounce();
+
+int debounceDelay = 1000; //ms delay between user command inputs
+int delayTimer = 0;
+
 const String deviceName = "efPlay";
 
 //Variables
@@ -41,13 +55,10 @@ int lastMSB = 0;
 int lastLSB = 0;
 int volume = 0;
 
-
 //Properties
 int line = 0;
 
-//debounce delay
-int debounceDelay = 500; //ms delay between user command inputs
-int delayTimer = 0;
+
 
 //AVRCP_ command is different in v6 and v7
 int ver = 6;
@@ -74,6 +85,8 @@ int startingVolume = 5; // 0-9, A-F
 bool initialized = false;
 String command = "";
 
+
+
 void setup() {
   //Serials init
   Serial.begin(9600);
@@ -88,6 +101,7 @@ void setup() {
 
   Serial.println("initialized display");
   screenCommand("STARTING...");
+
   //encoder + pushbutton
   //Initialize Buttons
   pinMode(buttonA, INPUT_PULLUP);
@@ -95,6 +109,17 @@ void setup() {
   pinMode(buttonC, INPUT_PULLUP);
   pinMode(buttonD, INPUT_PULLUP);
   pinMode(buttonPush, INPUT_PULLUP);
+  debouncerA.attach(buttonA);
+  debouncerB.attach(buttonB);
+  debouncerC.attach(buttonC);
+  debouncerD.attach(buttonD);
+  debouncerPush.attach(buttonPush);
+  debouncerA.interval(debouncerInterval);
+  debouncerB.interval(debouncerInterval);
+  debouncerC.interval(debouncerInterval);
+  debouncerD.interval(debouncerInterval);
+  debouncerPush.interval(debouncerInterval);
+
   //Initialize Encoders
   pinMode(encoderPin1, INPUT);
   pinMode(encoderPin2, INPUT);
@@ -165,9 +190,8 @@ void parseSerial() {
       if (command.startsWith("OPEN_OK 11")) {
         //check if the BC127 is connected to a phone
         //First run commands
-        Serial.println("Playing music");
+        Serial.println("Auto-playing music if available");
         Serial1.print("MUSIC 11 PLAY\r");
-        playPause = 1;
         initialized = true;
 
       } else if (command.startsWith("CLOSE_OK 11")) {
@@ -186,6 +210,7 @@ void parseSerial() {
         screenCommand ("BT: " + connectedName);
 
       } else  if (command.startsWith(avrcp_Command + "TITLE")) {
+        playPause = 1;
         //check if is a new track
         String previousTrack = track;
         track = command.substring(19 + offset);
@@ -260,6 +285,11 @@ void parseSerial() {
 void screenUpdate() {
 
   if (!initialized) {
+    return;
+  }
+
+  if (track == "No info") {
+    screenCommand("CONNECTING...");
     return;
   }
 
@@ -355,28 +385,37 @@ void checkButton() {
   //       v
   //       C
 
-  if (!digitalRead(buttonPush) == LOW) {
+  debouncerPush.update();
+
+  if (!debouncerPush.read() == LOW) {
     //No button pushed
     return;
   } else {
-    if (digitalRead(buttonA) == LOW) { //Up Button, STATUS
+    debouncerA.update();
+    if (debouncerA.read() == LOW) { //Up Button, STATUS
       Serial.println("*Pressed Up");
       if (initialized) {
         Serial1.print("STATUS AVRCP\r");
       } else {
         screenCommand("NOT CONNECTED");
       }
-    } else if (digitalRead(buttonB) == LOW) {
+    } else if (debouncerB.read() == LOW) {
       Serial.println("*BACKWARD command"); //Left Button, BACKWARD
       Serial1.print("MUSIC 11 BACKWARD\r");
       //screenCommand("BACKWARD");
-    } else if (digitalRead(buttonC) == LOW) {
+    } else if (debouncerC.read() == LOW) {
       Serial.println("Pressed Down");
-    } else if (digitalRead(buttonD) == LOW) {
+    } else if (debouncerD.read() == LOW) {
       Serial.println("*FORWARD command"); //Right Button, FORWARD
       Serial1.print("MUSIC 11 FORWARD\r");
       //      screenCommand("FORWARD");
     } else {
+
+      if(!delayReady){
+        return();
+        }
+      delayTimer = millis();
+      
       Serial.println("Push");
       //button is being pushed
       Serial.println("*BUTTON pushed");
@@ -387,36 +426,29 @@ void checkButton() {
         Serial.println("*PAUSE command");
         playPause = 0; //not playing music
         //        screenCommand("PAUSE");
-
-
-        //todo check this function, i don't think it works at all :)
-        //add a delay for the button
-        if (delayTimer > 0) {
-          delayTimer = millis();
-        } else {
-          if (delayTimer > debounceDelay) {
-            delayTimer = 0;
-          }
-        }
-
-      }
-      else {
+      } else {
         Serial1.print("PLAY\r"); //nothing is playing, let's listen to something
         Serial.println("*PLAY command");
         playPause = 1; //playing music
         screenCommand("PLAY");
 
-        //todo check this function, i don't think it works at all either
-        if (delayTimer > 0) {
-          delayTimer = millis();
-        } else {
-          if (delayTimer > debounceDelay) {
-            delayTimer = 0;
-          }
-        }
       }
-
     }
+
+  }
+}
+
+//Check button delay threshold, true if ready, false if still waiting
+bool delayReady() {
+  if (delayTimer <= 0) {
+    return (true);
+  } else if ((millis() - delayTimer) >= debounceDelay) {
+    //check that the time since delayTimer starter passes the debounceDelay threshold
+    delayTimer = 0;
+    return (true);
+  } else {
+    //still not ready
+    return (false);
   }
 }
 
@@ -459,6 +491,7 @@ void screenCommand(String command) {
   u8g2.clearBuffer();
 
   u8g2.setDrawColor(1);
+  //todo: update calc to center space with new font
   u8g2.setCursor(((screenWidth - (command.length() * 11 )) / 2) + 10, 26);
   u8g2.setFont(u8g2_font_helvB14_tr);
   u8g2.print(command);
