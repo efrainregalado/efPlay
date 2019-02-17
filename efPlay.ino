@@ -24,7 +24,7 @@ const int encoderPin1 = 2;  //Encoder1   White
 const int encoderPin2 = 3;  //Encoder2   Red
 const int buttonD =     4;  //Left       Yellow X
 const int buttonC =     5;  //Down       Yellow
-const int buttonB =     6;  //Right     a Blue
+const int buttonB =     6;  //Right      Blue
 const int buttonA =     7;  //Up         Green
 const int buttonPush =  8;  //Push       Red X
 
@@ -183,6 +183,18 @@ void parseSerial() {
       } else if (command.startsWith(avrcp_Command + "PLAYING")) {
         trackTime = command.substring(30 + offset);
         Serial.println("Track length: " + (String) trackTime);
+        //validate that the track length is valid (an actual number)
+        for (int i = 0; i = trackTime.length(); i++) {
+          Serial.println(trackTime[i]);
+          if (!isDigit(trackTime[i])) {
+            trackTime = "No info";
+            Serial.println("fuck");
+            break;
+          }
+        }
+
+
+
 
       } else if (command.startsWith("10 A2DP")) {
         //Check volume, returns a number from 0-9 and A-F
@@ -297,26 +309,24 @@ void screenUpdate() {
   int barTime = 0;
   if (!playPause) {
     if (pausedTime > 0) {
-      barTime = pausedTime;
-    } else {
-      Serial.print("!! PausedTime is off: " + (String) barTime);
+      //todo: there may be a cycle in which startTime moves
+      barTime = pausedTime - startTime;
     }
   } else {
     barTime = millis() - startTime;
-    //    Serial.print("Play : " + (String) barTime);
   }
 
+  // Serial.println("Bar: " + (String) barTime + " out of " + (String)trackTime);
+
+
   u8g2.setDrawColor(1); /* color 1 for the box */
-  float percentage = ((float)(barTime) / trackTime.toFloat());
-  int barLength = percentage * 256;
+  //draw the bar if values are valid
+  if (trackTime != "No info" && barTime > 0) {
+    float percentage = ((float)(barTime) / trackTime.toFloat());
+    int barLength = 1 + (percentage * 254);
+    u8g2.drawBox(0, 62, barLength, 3);
+  }
 
-  //  Serial.print("  Bar: " + (String)barLength);
-  //  if (percentage <= 0 || percentage >= 1) {
-  //  Serial.print(" !!!! Bar off bounds");
-  //  }
-  //  Serial.println();
-
-  u8g2.drawBox(0, 62, barLength, 3);
 
   //refresh the screen with updated info
   u8g2.sendBuffer();
