@@ -54,6 +54,9 @@ int ver = 6;
 String avrcp_Command = "";
 int offset = 0;
 
+String connectedName = "Not Connected";
+String connectedId = "Not Connected";
+
 String track    = "No info";
 String artist   = "No info";
 String trackTime = "No info";
@@ -167,6 +170,21 @@ void parseSerial() {
         playPause = 1;
         initialized = true;
 
+      } else if (command.startsWith("CLOSE_OK 11")) {
+        initialized = false;
+        screenCommand ("DISCONNECTED");
+
+      } else if (command.startsWith("LINK 11 CONNECTED AVRCP")) {
+        connectedId = command.substring(24, 36);
+        Serial.print("NAME " + connectedId);
+        Serial1.print("NAME " + connectedId + "\r");
+
+
+      } else if (command.startsWith("NAME " + connectedId)) {
+        connectedName = command.substring(19, (command.length() - 1));
+        Serial.println("deviceName: " + connectedName);
+        screenCommand ("BT: " + connectedName);
+
       } else  if (command.startsWith(avrcp_Command + "TITLE")) {
         //check if is a new track
         String previousTrack = track;
@@ -182,19 +200,13 @@ void parseSerial() {
 
       } else if (command.startsWith(avrcp_Command + "PLAYING")) {
         trackTime = command.substring(30 + offset);
-        Serial.println("Track length: " + (String) trackTime);
         //validate that the track length is valid (an actual number)
-        for (int i = 0; i = trackTime.length(); i++) {
-          Serial.println(trackTime[i]);
-          if (!isDigit(trackTime[i])) {
-            trackTime = "No info";
-            Serial.println("fuck");
-            break;
-          }
+        if (trackTime.toInt() % 1 == 0) {
+          Serial.println("Track length: " + (String) trackTime);
+        } else {
+          trackTime = "No info";
+          Serial.println("Track length couldn't be read correctly: " + (String) trackTime);
         }
-
-
-
 
       } else if (command.startsWith("10 A2DP")) {
         //Check volume, returns a number from 0-9 and A-F
@@ -235,10 +247,13 @@ void parseSerial() {
       serialString += c;
     }
   }
+
+  // Separate individual serial reads
   //  if (p) {
   //    Serial.println("**********************************************");
   //    p = false;
   //  }
+
 }
 
 
@@ -316,21 +331,18 @@ void screenUpdate() {
     barTime = millis() - startTime;
   }
 
-  // Serial.println("Bar: " + (String) barTime + " out of " + (String)trackTime);
-
-
   u8g2.setDrawColor(1); /* color 1 for the box */
   //draw the bar if values are valid
   if (trackTime != "No info" && barTime > 0) {
     float percentage = ((float)(barTime) / trackTime.toFloat());
     int barLength = 1 + (percentage * 254);
     u8g2.drawBox(0, 62, barLength, 3);
+  } else {
+    //  Serial.println("Either Bar: " + (String) barTime + " or Track length: " + (String)trackTime + " are not valid");
   }
-
 
   //refresh the screen with updated info
   u8g2.sendBuffer();
-
 }
 
 void checkButton() {
@@ -347,8 +359,13 @@ void checkButton() {
     //No button pushed
     return;
   } else {
-    if (digitalRead(buttonA) == LOW) {
-      Serial.println("Pressed Up");
+    if (digitalRead(buttonA) == LOW) { //Up Button, STATUS
+      Serial.println("*Pressed Up");
+      if (initialized) {
+        Serial1.print("STATUS AVRCP\r");
+      } else {
+        screenCommand("NOT CONNECTED");
+      }
     } else if (digitalRead(buttonB) == LOW) {
       Serial.println("*BACKWARD command"); //Left Button, BACKWARD
       Serial1.print("MUSIC 11 BACKWARD\r");
