@@ -16,6 +16,8 @@
 
 U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI u8g2(U8G2_R2, /* cs=*/ OLED_CS, /* dc=*/ OLED_DC, /* reset=*/ OLED_RESET);  // Enable U8G2_16BIT in u8g2.h
 ///* clock=*/ 52, /* data=*/ 51,
+const int screenWidth = 256; //pixels
+const int screenHeight = 64; //pixels
 
 //WIRING encoders + multi-rocker switch:
 //button in to pin for all buttons and encoders (no need for resistors since we're using pullups)
@@ -31,9 +33,6 @@ const int buttonB =     6;  //Right      Blue
 const int buttonA =     7;  //Up         Green
 const int buttonPush =  8;  //Push       Red X
 
-const int screenWidth = 256; //pixels
-const int screenHeight = 64; //pixels
-
 //debounce delay
 const int debouncerInterval = 10; //in ms
 Bounce debouncerA = Bounce();
@@ -41,9 +40,10 @@ Bounce debouncerB = Bounce();
 Bounce debouncerC = Bounce();
 Bounce debouncerD = Bounce();
 Bounce debouncerPush = Bounce();
+boolean isButtonDown = false;
 
-int debounceDelay = 1000; //ms delay between user command inputs
-int delayTimer = 0;
+const int commandThreshold = 1000; //ms to keep the screenCommand visible before going back to screenUpdate view
+long commandTimer = 0;
 
 const String deviceName = "efPlay";
 
@@ -57,8 +57,6 @@ int volume = 0;
 
 //Properties
 int line = 0;
-
-
 
 //AVRCP_ command is different in v6 and v7
 int ver = 6;
@@ -75,17 +73,16 @@ String trackTime = "No info";
 unsigned long startTime = 0;
 unsigned long pausedTime = 0;
 unsigned long elapsed = 0;
+long barTime = 0;
 
 String serialString = "";
 //String audioLinkID = "10";
 //String sourceLinkID = "11";
 //String callLinkID = "13";
-int playPause = 0;
 int startingVolume = 5; // 0-9, A-F
 bool initialized = false;
 String command = "";
-
-
+boolean playing = false;
 
 void setup() {
   //Serials init
@@ -100,6 +97,7 @@ void setup() {
   u8g2.enableUTF8Print();    // enable UTF8 support for the Arduino print() function
 
   Serial.println("initialized display");
+  commandTimer = millis() - commandThreshold - 1;
   screenCommand("STARTING...");
 
   //encoder + pushbutton
@@ -168,13 +166,11 @@ void checkpoint(String checkpoint) {
 }
 
 void loop() {
-  startTimer();
   parseSerial();
   screenUpdate();
   checkEncoder();
   checkButton();
 }
-
 
 void parseSerial() {
   boolean p = false;
@@ -210,14 +206,14 @@ void parseSerial() {
         screenCommand ("BT: " + connectedName);
 
       } else  if (command.startsWith(avrcp_Command + "TITLE")) {
-        playPause = 1;
+        playing = true;
         //check if is a new track
         String previousTrack = track;
         track = command.substring(19 + offset);
         if (previousTrack != track) {
           //set track original start time
           startTime = millis();
-          pausedTime = 0;
+          //pausedTime = 0;
         }
 
       } else if (command.startsWith(avrcp_Command + "ARTIST")) {
@@ -238,24 +234,11 @@ void parseSerial() {
         volume = strtol(command.substring(8).c_str(), 0, 16);
 
       } else if (command.startsWith("AVRCP_PLAY 11")) {
-        //user played from device
-        if (pausedTime > 0) {
-          Serial.println("!! Total time paused " + (String)elapsed);
-          startTime = millis() - elapsed;
-          Serial.println("!! User resumed at " + (String)(startTime + elapsed) + ". New startTime: " + (String) startTime);
-          pausedTime = 0;
-        }
-        playPause = 1;
-
+        //user pressed played from device
+        play();
       } else if (command.startsWith("AVRCP_PAUSE 11")) {
         //user paused from device
-        if (playPause) {
-          pausedTime = millis();
-          elapsed = pausedTime - startTime;
-          Serial.println("!! User paused at " + (String)pausedTime);
-          playPause = 0;
-        }
-
+        pause();
       } else if (command.startsWith("ABS_VOL 11")) {
         //volume returns a number from 0-127, turn it into hex 0-F
         float absVol = strtol(command.substring(11).c_str(), 0, 10);
@@ -272,29 +255,26 @@ void parseSerial() {
       serialString += c;
     }
   }
-
-  // Separate individual serial reads
-  //  if (p) {
-  //    Serial.println("**********************************************");
-  //    p = false;
-  //  }
-
 }
 
-
 void screenUpdate() {
-
-  if (!initialized) {
+  if (millis() - commandTimer <= commandThreshold) {
+    return;
+  }
+  if (!initialized || Serial1.available() > 0) {
     return;
   }
 
+  startTimer();
   if (track == "No info") {
-    screenCommand("CONNECTING...");
+    screenCommand("FINDING MEDIA");
     return;
   }
+  checkpoint("finding media");
 
   u8g2.clearBuffer();
 
+  checkpoint("clear buffer");
   u8g2.setFontMode(1);  /* activate transparent font mode */
   u8g2.setDrawColor(1); /* color 1 for the box */
   u8g2.drawBox(0, 8, 25, 8);
@@ -326,7 +306,7 @@ void screenUpdate() {
   u8g2.drawBox(200, 0, 40, 13);
 
   u8g2.setDrawColor(0);
-  if (playPause) {
+  if (playing) {
     u8g2.setCursor(209, 2);
     u8g2.print("PLAY");
   }
@@ -351,13 +331,7 @@ void screenUpdate() {
   u8g2.print("VOL "); u8g2.print(volumeLevel);
 
   //keep the bar static if paused
-  int barTime = 0;
-  if (!playPause) {
-    if (pausedTime > 0) {
-      //todo: there may be a cycle in which startTime moves
-      barTime = pausedTime - startTime;
-    }
-  } else {
+  if (playing) {
     barTime = millis() - startTime;
   }
 
@@ -365,14 +339,17 @@ void screenUpdate() {
   //draw the bar if values are valid
   if (trackTime != "No info" && barTime > 0) {
     float percentage = ((float)(barTime) / trackTime.toFloat());
-    int barLength = 1 + (percentage * 254);
+    int barLength = 1 + (percentage * (screenWidth - 2));
     u8g2.drawBox(0, 62, barLength, 3);
   } else {
-    //  Serial.println("Either Bar: " + (String) barTime + " or Track length: " + (String)trackTime + " are not valid");
+    Serial.println("Either Bar: " + (String) barTime + " or Track length: " + (String)trackTime + " are not valid");
   }
-
+  checkpoint("draw");
   //refresh the screen with updated info
-  u8g2.sendBuffer();
+  if (Serial1.available() == 0) {
+    u8g2.sendBuffer();
+    checkpoint("send buffer");
+  }
 }
 
 void checkButton() {
@@ -385,13 +362,18 @@ void checkButton() {
   //       v
   //       C
 
+  debouncerA.update();
+  debouncerB.update();
+  debouncerC.update();
+  debouncerD.update();
   debouncerPush.update();
 
-  if (!debouncerPush.read() == LOW) {
-    //No button pushed
+  if (debouncerPush.read() == HIGH) {
+    isButtonDown = false;
+    //No button pushed or delay threshold not met
     return;
-  } else {
-    debouncerA.update();
+  } else if (!isButtonDown) {
+    isButtonDown = true;
     if (debouncerA.read() == LOW) { //Up Button, STATUS
       Serial.println("*Pressed Up");
       if (initialized) {
@@ -410,45 +392,39 @@ void checkButton() {
       Serial1.print("MUSIC 11 FORWARD\r");
       //      screenCommand("FORWARD");
     } else {
-
-      if(!delayReady){
-        return();
-        }
-      delayTimer = millis();
-      
       Serial.println("Push");
       //button is being pushed
       Serial.println("*BUTTON pushed");
       checkVolume();
       Serial1.print("MUSIC 11 ");
-      if (playPause) {
+      if (playing) {
         Serial1.print("PAUSE\r"); //If music is playing, then stop it
         Serial.println("*PAUSE command");
-        playPause = 0; //not playing music
-        //        screenCommand("PAUSE");
+        pause();
       } else {
         Serial1.print("PLAY\r"); //nothing is playing, let's listen to something
         Serial.println("*PLAY command");
-        playPause = 1; //playing music
-        screenCommand("PLAY");
-
+        play();
       }
     }
-
   }
 }
 
-//Check button delay threshold, true if ready, false if still waiting
-bool delayReady() {
-  if (delayTimer <= 0) {
-    return (true);
-  } else if ((millis() - delayTimer) >= debounceDelay) {
-    //check that the time since delayTimer starter passes the debounceDelay threshold
-    delayTimer = 0;
-    return (true);
-  } else {
-    //still not ready
-    return (false);
+void play() {
+  if (!playing) {
+    if (pausedTime > 0) {
+      startTime = startTime + (millis() - pausedTime);
+      pausedTime = 0;
+    }
+    playing = true;
+  }
+}
+
+void pause() {
+  if (playing) {
+    pausedTime = millis();
+    playing = false;
+    Serial.println("!! User paused at " + (String)pausedTime);
   }
 }
 
@@ -488,6 +464,11 @@ void checkEncoder() {
 }
 
 void screenCommand(String command) {
+  if (millis() - commandTimer <= commandThreshold) {
+    return;
+  }
+  commandTimer = millis();
+
   u8g2.clearBuffer();
 
   u8g2.setDrawColor(1);
@@ -499,7 +480,6 @@ void screenCommand(String command) {
   //refresh the screen with updated info
   u8g2.sendBuffer();
 
-  delay(250);
 }
 
 void updateEncoder() {
