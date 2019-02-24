@@ -98,7 +98,7 @@ void setup() {
 
   Serial.println("initialized display");
   commandTimer = millis() - commandThreshold - 1;
-  screenCommand("STARTING...");
+  screenCommand("CONNECTING...");
 
   //encoder + pushbutton
   //Initialize Buttons
@@ -270,11 +270,8 @@ void screenUpdate() {
     screenCommand("FINDING MEDIA");
     return;
   }
-  checkpoint("finding media");
-
   u8g2.clearBuffer();
 
-  checkpoint("clear buffer");
   u8g2.setFontMode(1);  /* activate transparent font mode */
   u8g2.setDrawColor(1); /* color 1 for the box */
   u8g2.drawBox(0, 8, 25, 8);
@@ -344,11 +341,10 @@ void screenUpdate() {
   } else {
     Serial.println("Either Bar: " + (String) barTime + " or Track length: " + (String)trackTime + " are not valid");
   }
-  checkpoint("draw");
+ 
   //refresh the screen with updated info
   if (Serial1.available() == 0) {
     u8g2.sendBuffer();
-    checkpoint("send buffer");
   }
 }
 
