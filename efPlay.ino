@@ -14,10 +14,12 @@
 #define OLED_RESET 50 // was 57  = D9  - B5 
 //Note: also need to connect SCL to HW SCK = 52 and SDA to HW MOSI = 51 (in Arduino MEGA)
 
-U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI u8g2(U8G2_R2, /* cs=*/ OLED_CS, /* dc=*/ OLED_DC, /* reset=*/ OLED_RESET);  // Enable U8G2_16BIT in u8g2.h
+U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI u8g2(U8G2_R2, /* cs=*/ OLED_CS, /* dc=*/ OLED_DC, /* reset=*/ OLED_RESET);
+// Enable U8G2_16BIT in u8g2.h -> it will cause offset issues on drawFrame
 ///* clock=*/ 52, /* data=*/ 51,
 const int screenWidth = 256; //pixels
 const int screenHeight = 64; //pixels
+
 
 //WIRING encoders + multi-rocker switch:
 //button in to pin for all buttons and encoders (no need for resistors since we're using pullups)
@@ -283,6 +285,9 @@ void screenUpdate() {
   u8g2.setDrawColor(1);
   u8g2.setCursor(0, 18);
   u8g2.setFont(u8g2_font_6x10_tf);
+  //todo: scroll text if overflow
+  Serial.print("string width");
+  Serial.println(u8g2.getStrWidth(track.c_str()));
   u8g2.print(track);
 
   u8g2.setCursor(1, 32);
@@ -299,15 +304,16 @@ void screenUpdate() {
   u8g2.print(artist);
 
   //status & volume
-  u8g2.setDrawColor(1); /* color 1 for the box */
-  u8g2.drawBox(200, 0, 40, 13);
-
-  u8g2.setDrawColor(0);
   if (playing) {
+    u8g2.setDrawColor(1); /* color 1 for the box */
+    u8g2.drawBox(200, 0, 40, 13);
+    u8g2.setDrawColor(0);
     u8g2.setCursor(209, 2);
     u8g2.print("PLAY");
   }
   else {
+    u8g2.setDrawColor(1); /* color 1 for the box */
+    u8g2.drawFrame(200, 0, 40, 13);
     u8g2.setCursor(205, 2);
     u8g2.print("PAUSE");
   }
@@ -341,7 +347,7 @@ void screenUpdate() {
   } else {
     Serial.println("Either Bar: " + (String) barTime + " or Track length: " + (String)trackTime + " are not valid");
   }
- 
+
   //refresh the screen with updated info
   if (Serial1.available() == 0) {
     u8g2.sendBuffer();
