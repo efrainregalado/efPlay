@@ -34,6 +34,27 @@ const int buttonC =     5;  //Down       Yellow
 const int buttonB =     6;  //Right      Blue
 const int buttonA =     7;  //Up         Green
 const int buttonPush =  8;  //Push       Red X
+//scroll
+const int scrollWait = 2000; //ms before it starts and after it stops scrolling
+const int offsetSize = 3;
+
+//Variables
+volatile int lastEncoded = 0;
+volatile long encoderValue = 0;
+long oldEncoderValue = 0;
+int lastMSB = 0;
+int lastLSB = 0;
+int volume = 0;
+
+//scroll
+int trackOffset = 0;
+int trackWidth = 0;
+long trackTimer = 0;
+bool trackEndWait = false;
+int artistOffset = 0;
+int artistWidth = 0;
+long artistTimer = 0;
+bool artistEndWait = false;
 
 //debounce delay
 const int debouncerInterval = 10; //in ms
@@ -48,14 +69,6 @@ const int commandThreshold = 1000; //ms to keep the screenCommand visible before
 long commandTimer = 0;
 
 const String deviceName = "efPlay";
-
-//Variables
-volatile int lastEncoded = 0;
-volatile long encoderValue = 0;
-long oldEncoderValue = 0;
-int lastMSB = 0;
-int lastLSB = 0;
-int volume = 0;
 
 //Properties
 int line = 0;
@@ -216,19 +229,30 @@ void parseSerial() {
           //set track original start time
           startTime = millis();
           //pausedTime = 0;
+
+          //on new track, determine pixel width
+          u8g2.setFont(u8g2_font_6x10_tf);
+          trackWidth = u8g2.getUTF8Width(track.c_str());
+          Serial.println("track width: " + (String) trackWidth);
         }
 
       } else if (command.startsWith(avrcp_Command + "ARTIST")) {
         artist = command.substring(20 + offset);
 
+        //on new artist, determine pixel width
+        u8g2.setFont(u8g2_font_6x10_tf);
+        artistWidth = u8g2.getUTF8Width(artist.c_str());
+        //Serial.println("artist width: " + (String) artistWidth);
+
       } else if (command.startsWith(avrcp_Command + "PLAYING")) {
         trackTime = command.substring(30 + offset);
         //validate that the track length is valid (an actual number)
         if (trackTime.toInt() % 1 == 0) {
-          Serial.println("Track length: " + (String) trackTime);
+          //Serial.println("Track length: " + (String) trackTime);
         } else {
           trackTime = "No info";
           Serial.println("Track length couldn't be read correctly: " + (String) trackTime);
+
         }
 
       } else if (command.startsWith("10 A2DP")) {
@@ -278,29 +302,63 @@ void screenUpdate() {
   u8g2.setDrawColor(1); /* color 1 for the box */
   u8g2.drawBox(0, 8, 25, 8);
 
+  //track label and string
   u8g2.setDrawColor(0);
   u8g2.setFont(u8g2_font_5x7_tf);
   u8g2.setCursor(0, 8);
   u8g2.print("TRACK");
   u8g2.setDrawColor(1);
-  u8g2.setCursor(0, 18);
   u8g2.setFont(u8g2_font_6x10_tf);
-  //todo: scroll text if overflow
-  Serial.print("string width");
-  Serial.println(u8g2.getStrWidth(track.c_str()));
+  u8g2.setCursor(0 - trackOffset, 18);
+  //scrolling logic
+  if ((trackOffset == 0 || trackOffset > (trackWidth - 255)) && trackTimer == 0) {
+    trackTimer = millis() + scrollWait;
+  }
+  if (millis() >= trackTimer && trackWidth >= 255) {
+    if (trackOffset <= (trackWidth - 255)) {
+      trackOffset = trackOffset + offsetSize;
+    } else {
+      if (!trackEndWait) {
+        trackEndWait = true;
+      } else {
+        trackOffset = 0;
+        trackEndWait = false;
+      }
+      trackTimer = 0;
+    }
+  }
   u8g2.print(track);
 
-  u8g2.setCursor(1, 32);
+  //artist label and string
   u8g2.setFontMode(1);  /* activate transparent font mode */
   u8g2.setDrawColor(1); /* color 1 for the box */
   u8g2.drawBox(0, 32, 31, 8);
 
   u8g2.setDrawColor(0);
   u8g2.setFont(u8g2_font_5x7_tf);
+  u8g2.setCursor(1, 32);
   u8g2.print("ARTIST");
   u8g2.setDrawColor(1);
-  u8g2.setCursor(0, 42);
+
   u8g2.setFont(u8g2_font_6x10_tf);
+  u8g2.setCursor(0 - artistOffset, 42);
+  //scrolling logic
+  if ((artistOffset == 0 || artistOffset > (artistWidth - 255)) && artistTimer == 0) {
+    artistTimer = millis() + scrollWait;
+  }
+  if (millis() >= artistTimer && artistWidth >= 255) {
+    if (artistOffset <= (artistWidth - 255)) {
+      artistOffset = artistOffset + offsetSize;
+    } else {
+      if (!artistEndWait) {
+        artistEndWait = true;
+      } else {
+        artistOffset = 0;
+        artistEndWait = false;
+      }
+      artistTimer = 0;
+    }
+  }
   u8g2.print(artist);
 
   //status & volume
