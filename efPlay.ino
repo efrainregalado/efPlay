@@ -17,16 +17,12 @@
 U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI u8g2(U8G2_R2, /* cs=*/ OLED_CS, /* dc=*/ OLED_DC, /* reset=*/ OLED_RESET);
 // Enable U8G2_16BIT in u8g2.h -> it will cause offset issues on drawFrame
 ///* clock=*/ 52, /* data=*/ 51,
+
+//Constants
 const int screenWidth = 256; //pixels
 const int screenHeight = 64; //pixels
 
-
 //WIRING encoders + multi-rocker switch:
-//button in to pin for all buttons and encoders (no need for resistors since we're using pullups)
-//these pins can not be changed 2/3 are special pins
-//works on MEGA, no need for caps/resistors
-
-//Constants
 const int encoderPin1 = 2;  //Encoder1   White
 const int encoderPin2 = 3;  //Encoder2   Red
 const int buttonD =     4;  //Left       Yellow X
@@ -34,6 +30,7 @@ const int buttonC =     5;  //Down       Yellow
 const int buttonB =     6;  //Right      Blue
 const int buttonA =     7;  //Up         Green
 const int buttonPush =  8;  //Push       Red X
+
 //scroll
 const int scrollWait = 2000; //ms before it starts and after it stops scrolling
 const int offsetSize = 3;
@@ -81,8 +78,8 @@ int offset = 0;
 String connectedName = "Not Connected";
 String connectedId = "Not Connected";
 
-String track    = "No info";
-String artist   = "No info";
+String track     = "No info";
+String artist    = "No info";
 String trackTime = "No info";
 
 unsigned long startTime = 0;
@@ -229,11 +226,14 @@ void parseSerial() {
           //set track original start time
           startTime = millis();
           //pausedTime = 0;
-
           //on new track, determine pixel width
           u8g2.setFont(u8g2_font_6x10_tf);
           trackWidth = u8g2.getUTF8Width(track.c_str());
-          Serial.println("track width: " + (String) trackWidth);
+          //reset scrolling variables
+          trackOffset = 0;
+          trackTimer = 0;
+          trackEndWait = false;
+          //Serial.println("track width: " + (String) trackWidth);
         }
 
       } else if (command.startsWith(avrcp_Command + "ARTIST")) {
@@ -242,6 +242,11 @@ void parseSerial() {
         //on new artist, determine pixel width
         u8g2.setFont(u8g2_font_6x10_tf);
         artistWidth = u8g2.getUTF8Width(artist.c_str());
+        //reset scrolling variables
+        artistOffset = 0;
+        artistTimer = 0;
+        artistEndWait = false;
+
         //Serial.println("artist width: " + (String) artistWidth);
 
       } else if (command.startsWith(avrcp_Command + "PLAYING")) {
